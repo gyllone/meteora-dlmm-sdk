@@ -1,7 +1,7 @@
 import { BN } from "@coral-xyz/anchor";
 import {
   BASIS_POINT_MAX,
-  MAX_BIN_PER_POSITION,
+  DEFAULT_BIN_PER_POSITION,
   SCALE_OFFSET,
 } from "../constants";
 import Decimal from "decimal.js";
@@ -74,9 +74,13 @@ export function computeBaseFactorFromFeeBps(binStep: BN, feeBps: BN) {
 }
 
 export function getQPriceFromId(binId: BN, binStep: BN): BN {
+  return pow(getQPriceBaseFactor(binStep), binId);
+}
+
+export function getQPriceBaseFactor(binStep: BN): BN {
   const bps = binStep.shln(SCALE_OFFSET).div(new BN(BASIS_POINT_MAX));
   const base = ONE.add(bps);
-  return pow(base, binId);
+  return base;
 }
 
 export function getC(
@@ -153,8 +157,34 @@ export function distributeAmountToCompressedBinsByRatio(
 
 export function getPositionCount(minBinId: BN, maxBinId: BN) {
   const binDelta = maxBinId.sub(minBinId);
-  const positionCount = binDelta.div(MAX_BIN_PER_POSITION);
+  const positionCount = binDelta.div(DEFAULT_BIN_PER_POSITION);
   return positionCount.add(new BN(1));
+}
+
+export function findOptimumDecompressMultiplier(
+  binAmount: Map<number, BN>,
+  tokenDecimal: BN
+) {
+  let multiplier = new BN(10).pow(tokenDecimal);
+
+  while (!multiplier.isZero()) {
+    let found = true;
+
+    for (const [_binId, amount] of binAmount) {
+      const compressedAmount = amount.div(multiplier);
+      if (compressedAmount.isZero()) {
+        multiplier = multiplier.div(new BN(10));
+        found = false;
+        break;
+      }
+    }
+
+    if (found) {
+      return multiplier;
+    }
+  }
+
+  throw "Couldn't find optimum multiplier";
 }
 
 export function compressBinAmount(binAmount: Map<number, BN>, multiplier: BN) {
@@ -207,6 +237,10 @@ export function generateAmountForBinRange(
       maxPrice,
       k
     );
+
+    if (binAmount.isZero()) {
+      throw "bin amount is zero";
+    }
 
     binAmounts.set(i, binAmount);
   }
